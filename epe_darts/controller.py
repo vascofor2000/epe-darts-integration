@@ -28,8 +28,8 @@ class SearchController(pl.LightningModule):
                                   'w_lr', 'w_momentum', 'w_weight_decay', 'w_lr_min', 'w_grad_clip', 'nesterov',
                                   'alpha_lr', 'alpha_weight_decay', 'amended_hessian',
                                   'normal_none_penalty', 'reduce_none_penalty', 'max_epochs')
-        
-        self.automatic_optimization = not bi_level_optimization
+        #COMENTEI A SEGUINTE LINHA PORQUE ORIGINAVA ERRO (can't set attribute)
+        #self.automatic_optimization = not bi_level_optimization
         self.bi_level_optimization: bool = bi_level_optimization
 
         self.image_log_path: Path = image_log_path
