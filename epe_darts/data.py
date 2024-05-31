@@ -5,6 +5,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from torchvision import datasets
 from torchvision.datasets import VisionDataset
+import numpy as np
 
 from epe_darts import preproc
 
@@ -12,18 +13,19 @@ from epe_darts import preproc
 class DataModule(LightningDataModule):
     def __init__(self, dataset, data_dir='datasets', split_train: bool = False, return_train_val: bool = True,
                  cutout_length=0, batch_size=64, workers: Optional[int] = None,
-                 train_transforms=None, val_transforms=None, test_transforms=None, dims=None):
+                 train_transforms=None, val_transforms=None, test_transforms=None, dims=None, dataset_portion: float = 1):
         self.dataset_name: str = dataset.lower()
         self.data_dir: str = data_dir
         self.split_train: bool = split_train
         self.return_train_val: bool = return_train_val
         self.train_indices: List[int] = []
         self.valid_indices: List[int] = []
+        self.dataset_portion: float = dataset_portion
 
         self.cutout_length: int = cutout_length
         self.batch_size: int = batch_size
         self.workers: int = max(os.cpu_count() - 1, 1) if workers is None else workers
-
+        
         if self.dataset_name == 'cifar10':          dataset_class, n_classes = datasets.CIFAR10, 10
         elif self.dataset_name == 'cifar100':       dataset_class, n_classes = datasets.CIFAR100, 100
         elif self.dataset_name == 'imagenet':       dataset_class, n_classes = datasets.ImageNet, 1000
@@ -52,7 +54,7 @@ class DataModule(LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         self.train_data = self.dataset_class(root=self.data_dir, train=True, download=True, transform=self.train_transforms)
         self.valid_data = self.dataset_class(root=self.data_dir, train=False, download=True, transform=self.val_transforms)
-
+        
         if self.split_train:
             n_train = len(self.train_data)
             split = n_train // 2
@@ -62,6 +64,16 @@ class DataModule(LightningDataModule):
         else:
             self.train_indices = list(range(len(self.train_data)))
             self.valid_indices = list(range(len(self.valid_data)))
+
+        '''
+        auxiliar to have just a portion of the dataset, for debugging'''
+        if self.dataset_portion != 1:
+            val_size = self.dataset_portion # 10% of the data when debugging
+            num_samples = len(self.train_indices)
+            self.train_indices = np.random.choice(num_samples, int(num_samples * val_size), replace=False)
+            num_samples = len(self.valid_indices)
+            self.valid_indices = np.random.choice(num_samples, int(num_samples * val_size), replace=False)
+        '''end of it'''
 
         # assuming shape is NHW or NHWC
         self.shape = self.train_data.data.shape

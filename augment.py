@@ -18,7 +18,7 @@ def train(name: str, dataset: str, genotype: str, project: str = 'augment-epe-da
           lr: float = 0.025, momentum: float = 0.9, weight_decay: float = 3e-4, grad_clip: float = 5.,
           print_freq: int = 200, gpus: Union[List[int], int] = -1,
           init_channels: int = 36, layers: int = 20, stem_multiplier: int = 3, workers: Optional[int] = None,
-          aux_weight: float = 0.4, cutout_length: int = 16, drop_path_prob: float = 0.2):
+          aux_weight: float = 0.4, cutout_length: int = 16, drop_path_prob: float = 0.2, dataset_portion: float = 1):
     """
     Training Augmented Model
 
@@ -53,7 +53,7 @@ def train(name: str, dataset: str, genotype: str, project: str = 'augment-epe-da
     genotype: Genotype = gt.from_str(genotype)
 
     data = DataModule(dataset, data_path, split_train=False,
-                      cutout_length=cutout_length, batch_size=batch_size, workers=workers)
+                      cutout_length=cutout_length, batch_size=batch_size, workers=workers, dataset_portion=dataset_portion)
     data.setup()
 
     model = AugmentCNN(data.input_size, data.input_channels, init_channels, data.n_classes, layers,

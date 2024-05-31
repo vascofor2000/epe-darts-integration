@@ -9,6 +9,7 @@ from typing import List, Tuple, Optional, Iterable
 import torch
 import torch.nn as nn
 from graphviz import Digraph
+import numpy as np
 
 from epe_darts import ops
 from epe_darts.utils import PathLike
@@ -72,41 +73,88 @@ def parse(alpha: Iterable[nn.Parameter], search_space: str, k: int = 2,
         ...
     ]
 
-    If algorithm = 'top-k' =>  each node has two edges (k=2) in CNN.
+    If algorithm = 'top-k' =>  each node has two edges (k=2) in CNN. Ignoring the none operation.
+    If algorithm = 'top-k_with_none' =>  each node has two edges (k=2) in CNN. Without ignoring the none operation.
     If algorithm = 'best' => each node as as many connections as there are not-none top nodes connected to it
     """
 
     gene = []
     primitives = ops.SEARCH_SPACE2OPS[search_space]
     assert primitives[-1] == 'none'  # assume last PRIMITIVE is 'none'
-
+    
+    concat = []
     # 1) Convert the mixed op to discrete edge (single op) by choosing top-1 weight edge
     # 2) Choose top-k edges per node by edge score (top-1 weight in edge)
-    for edges in alpha:
+    for idx, edges in enumerate(alpha):#here is calling edges but might be better to call it node, a node which has as many edges as prior nodes
         # edges: Tensor(n_edges, n_ops)
+        #print(f"A edge is {edges}")
         if algorithm == 'top-k':  # ignore 'none'
             edges = edges[:, :-1]
 
         edge_max, primitive_indices = torch.topk(edges, 1)
         topk_edge_values, topk_edge_indices = torch.topk(edge_max.view(-1), k)
         node_gene = []
+        
 
-        if algorithm == 'top-k':
+        if algorithm == 'top-k' or algorithm == 'top-k_with_none':
             for edge_idx in topk_edge_indices:
                 prim_idx = primitive_indices[edge_idx]
                 prim = primitives[prim_idx]
-                node_gene.append((prim, edge_idx.item()))
+                if prim != 'none':
+                    node_gene.append((prim, edge_idx.item()))
+            if node_gene != []:
+                concat.append(idx+2)
+
+        elif algorithm == 'topk-edge':
+            edge_max, primitive_indices = torch.topk(edges, k)
+            for edge_idx, prim_idxs in enumerate(primitive_indices):
+                for prim_idx in prim_idxs:
+                    prim = primitives[prim_idx]
+                    if prim != 'none':
+                        node_gene.append((prim, edge_idx))
+            if node_gene != []:
+                concat.append(idx+2)
+
+        elif algorithm == 'topk-node':
+            topk_edge_values, topk_edge_indices = torch.topk(edges.view(-1), k)
+            real_topk_indices = np.array(np.unravel_index(topk_edge_indices.cpu().numpy(), edges.shape)).T
+            for coor in real_topk_indices:
+                prim = primitives[coor[1]]
+                if prim != 'none':
+                        node_gene.append((prim, coor[0]))
+            if node_gene != []:
+                concat.append(idx+2)
+
+
         elif algorithm == 'best':
             for edge_idx, prim_idx in enumerate(primitive_indices):
                 prim = primitives[prim_idx]
                 if prim != 'none':
                     node_gene.append((prim, edge_idx))
+            if node_gene != []:
+                concat.append(idx+2)
+        elif algorithm == 'all':
+            for edge_idx, edge in enumerate(edges):
+                for op_idx, alpha_op in enumerate(edge):
+                    if alpha_op != 0:
+                        prim = primitives[op_idx]
+                        if prim != 'none':
+                            node_gene.append((prim, edge_idx))
+            if node_gene != []:
+                concat.append(idx+2)
         else:
             raise ValueError(f'Algorithm {algorithm} not supported')
 
         gene.append(node_gene)
 
-    return gene
+    return gene, concat
+
+def concat_for_gene(gene):
+    concat=[]
+    for idx, node_gene in enumerate(gene):
+        if node_gene != []:
+            concat.append(idx+2)
+    return concat
 
 
 def plot(genotype: Genotype, file_path: PathLike, caption: Optional[str] = None):

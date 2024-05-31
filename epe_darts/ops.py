@@ -1,6 +1,7 @@
 """ Operations """
 import torch
 import torch.nn as nn
+from copy import deepcopy
 
 OPS = {
     'none': lambda channels, stride, affine: Zero(stride),
@@ -16,17 +17,27 @@ OPS = {
     'nor_conv_7x7': lambda channels, stride, affine: ReLUConvBN(channels, channels, 7, stride, 3, affine=affine),
     'nor_conv_3x3': lambda channels, stride, affine: ReLUConvBN(channels, channels, 3, stride, 1, affine=affine),
     'nor_conv_1x1': lambda channels, stride, affine: ReLUConvBN(channels, channels, 1, stride, 0, affine=affine),
+    #all from nats
+    "nats-nor_conv_1x1": lambda C_in, C_out, stride, affine, track_running_stats: NATSReLUConvBN(C_in,C_out,(1, 1),(stride, stride),(0, 0),(1, 1),affine,track_running_stats),
+    "nats-nor_conv_3x3": lambda C_in, C_out, stride, affine, track_running_stats: NATSReLUConvBN(C_in,C_out,(3, 3),(stride, stride),(1, 1),(1, 1),affine,track_running_stats),
+    "nats-avg_pool_3x3": lambda C_in, C_out, stride, affine, track_running_stats: POOLING(C_in, C_out, stride, "avg", affine, track_running_stats),
+    "nats-skip_connect": lambda C_in, C_out, stride, affine, track_running_stats: Identity(),
+    "nats-none": lambda C_in, C_out, stride, affine, track_running_stats: NATSZero(C_in, C_out, stride),
 }
 
 
 CONNECT_NAS_BENCHMARK = ['nor_conv_3x3', 'skip_connect', 'none']
-NAS_BENCH_201         = ['nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3', 'skip_connect', 'none']
+NAS_BENCH_201         = ['nats-nor_conv_1x1', 'nats-nor_conv_3x3', 'nats-avg_pool_3x3', 'nats-skip_connect', 'nats-none']
 DARTS                 = ['sep_conv_3x3', 'sep_conv_5x5', 'dil_conv_3x3', 'dil_conv_5x5',
                          'avg_pool_3x3', 'max_pool_3x3', 'skip_connect', 'none']
+S2                    = ['sep_conv_3x3', 'skip_connect']
+S3                    = ['sep_conv_3x3', 'skip_connect', 'none']
 SEARCH_SPACE2OPS = {
     'connect-nas-bench': CONNECT_NAS_BENCHMARK,
     'nas-bench-201': NAS_BENCH_201,
     'darts': DARTS,
+    'S2': S2,
+    'S3': S3,
 }
 
 
@@ -205,6 +216,69 @@ class FactorizedReduce(nn.Module):
         out = self.bn(out)
         return out
 
+class namingOP(nn.Module):
+    """little trick to have the name of the operations when calling named_parameters()"""
+    def __init__(self, primitive, op):
+        super().__init__()
+        self.primitive = primitive
+        if primitive == "none":
+            self.none = op
+        elif primitive == 'avg_pool_3x3':
+            self.avg_pool_3x3 = op
+        elif primitive == 'max_pool_3x3':
+            self.max_pool_3x3 = op
+        elif primitive == 'skip_connect':
+            self.skip_connect = op
+        elif primitive == 'sep_conv_3x3':
+            self.sep_conv_3x3 = op
+        elif primitive == 'sep_conv_5x5':
+            self.sep_conv_5x5 = op
+        elif primitive == 'sep_conv_7x7':
+            self.sep_conv_7x7 = op
+        elif primitive == 'dil_conv_3x3':
+            self.dil_conv_3x3 = op
+        elif primitive == 'dil_conv_5x5':
+            self.dil_conv_5x5 = op
+        elif primitive == 'conv_7x1_1x7':
+            self.conv_7x1_1x7 = op
+        elif primitive == 'nor_conv_7x7':
+            self.nor_conv_7x7 = op
+        elif primitive == 'nor_conv_3x3':
+            self.nor_conv_3x3 = op
+        elif primitive == 'nor_conv_1x1':
+            self.nor_conv_1x1 = op
+    
+    def forward(self, x):
+        if self.primitive == "none":
+            return self.none(x)
+        elif self.primitive == 'avg_pool_3x3':
+            return self.avg_pool_3x3(x)
+        elif self.primitive == 'max_pool_3x3':
+            return self.max_pool_3x3(x)
+        elif self.primitive == 'skip_connect':
+            return self.skip_connect(x)
+        elif self.primitive == 'sep_conv_3x3':
+            return self.sep_conv_3x3(x)
+        elif self.primitive == 'sep_conv_5x5':
+            return self.sep_conv_5x5(x)
+        elif self.primitive == 'sep_conv_7x7':
+            return self.sep_conv_7x7(x)
+        elif self.primitive == 'dil_conv_3x3':
+            return self.dil_conv_3x3(x)
+        elif self.primitive == 'dil_conv_5x5':
+            return self.dil_conv_5x5(x)
+        elif self.primitive == 'conv_7x1_1x7':
+            return self.conv_7x1_1x7(x)
+        elif self.primitive == 'nor_conv_7x7':
+            return self.nor_conv_7x7(x)
+        elif self.primitive == 'nor_conv_3x3':
+            return self.nor_conv_3x3(x)
+        elif self.primitive == 'nor_conv_1x1':
+            return self.nor_conv_1x1(x)
+        
+    def print_primitive(self):
+        print(f"primitive is {self.primitive}")
+
 
 class MixedOp(nn.Module):
     """ Mixed operation """
@@ -213,7 +287,8 @@ class MixedOp(nn.Module):
         self._ops = nn.ModuleList()
         for primitive in SEARCH_SPACE2OPS[search_space]:
             op = OPS[primitive](channels, stride, affine=False)
-            self._ops.append(op)
+            #self._ops.append(op)
+            self._ops.append(namingOP(primitive, op))
 
     def forward(self, x, weights):
         """
@@ -221,4 +296,296 @@ class MixedOp(nn.Module):
             x: input
             weights: weight for each operation
         """
+        #for w, op in zip(weights, self._ops):
+            #if w == 0:
+            #    op.print_primitive()
         return sum(w * op(x) for w, op in zip(weights, self._ops) if w != 0)
+        #return sum(w * op(x) for w, op in zip(weights, self._ops))
+
+
+#FOR NATS-BENCH
+class NATSReLUConvBN(nn.Module):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        affine,
+        track_running_stats=True,
+    ):
+        super(NATSReLUConvBN, self).__init__()
+        self.op = nn.Sequential(
+            nn.ReLU(inplace=False),
+            nn.Conv2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                bias=not affine,
+            ),
+            nn.BatchNorm2d(
+                C_out, affine=affine, track_running_stats=track_running_stats
+            ),
+        )
+
+    def forward(self, x):
+        return self.op(x)
+
+class POOLING(nn.Module):
+    def __init__(
+        self, C_in, C_out, stride, mode, affine=True, track_running_stats=True
+    ):
+        super(POOLING, self).__init__()
+        if C_in == C_out:
+            self.preprocess = None
+        else:
+            self.preprocess = ReLUConvBN(
+                C_in, C_out, 1, 1, 0, 1, affine, track_running_stats
+            )
+        if mode == "avg":
+            self.op = nn.AvgPool2d(3, stride=stride, padding=1, count_include_pad=False)
+        elif mode == "max":
+            self.op = nn.MaxPool2d(3, stride=stride, padding=1)
+        else:
+            raise ValueError("Invalid mode={:} in POOLING".format(mode))
+
+    def forward(self, inputs):
+        if self.preprocess:
+            x = self.preprocess(inputs)
+        else:
+            x = inputs
+        return self.op(x)
+
+
+class ResNetBasicblock(nn.Module):
+    def __init__(self, inplanes, planes, stride, affine=True, track_running_stats=True):
+        super(ResNetBasicblock, self).__init__()
+        assert stride == 1 or stride == 2, "invalid stride {:}".format(stride)
+        self.conv_a = NATSReLUConvBN(
+            inplanes, planes, 3, stride, 1, 1, affine, track_running_stats
+        )
+        self.conv_b = NATSReLUConvBN(
+            planes, planes, 3, 1, 1, 1, affine, track_running_stats
+        )
+        if stride == 2:
+            self.downsample = nn.Sequential(
+                nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
+                nn.Conv2d(
+                    inplanes, planes, kernel_size=1, stride=1, padding=0, bias=False
+                ),
+            )
+        elif inplanes != planes:
+            self.downsample = NATSReLUConvBN(
+                inplanes, planes, 1, 1, 0, 1, affine, track_running_stats
+            )
+        else:
+            self.downsample = None
+        self.in_dim = inplanes
+        self.out_dim = planes
+        self.stride = stride
+        self.num_conv = 2
+
+    def extra_repr(self):
+        string = "{name}(inC={in_dim}, outC={out_dim}, stride={stride})".format(
+            name=self.__class__.__name__, **self.__dict__
+        )
+        return string
+
+    def forward(self, inputs):
+
+        basicblock = self.conv_a(inputs)
+        basicblock = self.conv_b(basicblock)
+
+        if self.downsample is not None:
+            residual = self.downsample(inputs)
+        else:
+            residual = inputs
+        return residual + basicblock
+
+class NATSZero(nn.Module):
+    def __init__(self, C_in, C_out, stride):
+        super(Zero, self).__init__()
+        self.C_in = C_in
+        self.C_out = C_out
+        self.stride = stride
+        self.is_zero = True
+
+    def forward(self, x):
+        if self.C_in == self.C_out:
+            if self.stride == 1:
+                return x.mul(0.0)
+            else:
+                return x[:, :, :: self.stride, :: self.stride].mul(0.0)
+        else:
+            shape = list(x.shape)
+            shape[1] = self.C_out
+            zeros = x.new_zeros(shape, dtype=x.dtype, device=x.device)
+            return zeros
+
+    def extra_repr(self):
+        return "C_in={C_in}, C_out={C_out}, stride={stride}".format(**self.__dict__)
+
+
+# This module is used for NAS-Bench-201, represents a small search space with a complete DAG
+class NAS201SearchCell(nn.Module):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        stride,
+        max_nodes,
+        search_space,
+        affine=False,
+        track_running_stats=True,
+    ):
+        super(NAS201SearchCell, self).__init__()
+
+        op_names = SEARCH_SPACE2OPS[search_space]
+        self.op_names = deepcopy(op_names)
+        self.edges = nn.ModuleDict()
+        self.max_nodes = max_nodes
+        self.in_dim = C_in
+        self.out_dim = C_out
+        for i in range(1, max_nodes):
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                if j == 0:
+                    xlists = [
+                        OPS[op_name](C_in, C_out, stride, affine, track_running_stats)
+                        for op_name in op_names
+                    ]
+                else:
+                    xlists = [
+                        OPS[op_name](C_in, C_out, 1, affine, track_running_stats)
+                        for op_name in op_names
+                    ]
+                self.edges[node_str] = nn.ModuleList(xlists)
+        self.edge_keys = sorted(list(self.edges.keys()))
+        self.edge2index = {key: i for i, key in enumerate(self.edge_keys)}
+        self.num_edges = len(self.edges)
+
+    def extra_repr(self):
+        string = "info :: {max_nodes} nodes, inC={in_dim}, outC={out_dim}".format(
+            **self.__dict__
+        )
+        return string
+
+    def forward(self, inputs, weightss):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            inter_nodes = []
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                weights = weightss[self.edge2index[node_str]]
+                inter_nodes.append(
+                    sum(
+                        layer(nodes[j]) * w
+                        for layer, w in zip(self.edges[node_str], weights)
+                    )
+                )
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # GDAS
+    def forward_gdas(self, inputs, hardwts, index):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            inter_nodes = []
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                weights = hardwts[self.edge2index[node_str]]
+                argmaxs = index[self.edge2index[node_str]].item()
+                weigsum = sum(
+                    weights[_ie] * edge(nodes[j]) if _ie == argmaxs else weights[_ie]
+                    for _ie, edge in enumerate(self.edges[node_str])
+                )
+                inter_nodes.append(weigsum)
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # GDAS Variant: https://github.com/D-X-Y/AutoDL-Projects/issues/119
+    def forward_gdas_v1(self, inputs, hardwts, index):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            inter_nodes = []
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                weights = hardwts[self.edge2index[node_str]]
+                argmaxs = index[self.edge2index[node_str]].item()
+                weigsum = weights[argmaxs] * self.edges[node_str](nodes[j])
+                inter_nodes.append(weigsum)
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # joint
+    def forward_joint(self, inputs, weightss):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            inter_nodes = []
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                weights = weightss[self.edge2index[node_str]]
+                # aggregation = sum( layer(nodes[j]) * w for layer, w in zip(self.edges[node_str], weights) ) / weights.numel()
+                aggregation = sum(
+                    layer(nodes[j]) * w
+                    for layer, w in zip(self.edges[node_str], weights)
+                )
+                inter_nodes.append(aggregation)
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # uniform random sampling per iteration, SETN
+    def forward_urs(self, inputs):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            while True:  # to avoid select zero for all ops
+                sops, has_non_zero = [], False
+                for j in range(i):
+                    node_str = "{:}<-{:}".format(i, j)
+                    candidates = self.edges[node_str]
+                    select_op = random.choice(candidates)
+                    sops.append(select_op)
+                    if not hasattr(select_op, "is_zero") or select_op.is_zero is False:
+                        has_non_zero = True
+                if has_non_zero:
+                    break
+            inter_nodes = []
+            for j, select_op in enumerate(sops):
+                inter_nodes.append(select_op(nodes[j]))
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # select the argmax
+    def forward_select(self, inputs, weightss):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            inter_nodes = []
+            for j in range(i):
+                node_str = "{:}<-{:}".format(i, j)
+                weights = weightss[self.edge2index[node_str]]
+                inter_nodes.append(
+                    self.edges[node_str][weights.argmax().item()](nodes[j])
+                )
+                # inter_nodes.append( sum( layer(nodes[j]) * w for layer, w in zip(self.edges[node_str], weights) ) )
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+    # forward with a specific structure
+    def forward_dynamic(self, inputs, structure):
+        nodes = [inputs]
+        for i in range(1, self.max_nodes):
+            cur_op_node = structure.nodes[i - 1]
+            inter_nodes = []
+            for op_name, j in cur_op_node:
+                node_str = "{:}<-{:}".format(i, j)
+                op_index = self.op_names.index(op_name)
+                inter_nodes.append(self.edges[node_str][op_index](nodes[j]))
+            nodes.append(sum(inter_nodes))
+        return nodes[-1]
+
+

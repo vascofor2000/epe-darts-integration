@@ -23,7 +23,16 @@ def main(name: str, dataset: str, data_path: str = 'datasets/', project: str = '
          sparsity: float = 1,
          alpha_lr: float = 3e-4, alpha_weight_decay: float = 1e-3, alphas_path: Optional[str] = None,
          mask_alphas: bool = False, prune_strategy: str = 'smallest', amended_hessian: bool = False,
-         normal_none_penalty: float = 0, reduce_none_penalty: float = 0):
+         normal_none_penalty: float = 0, reduce_none_penalty: float = 0,
+         debugging: bool = False, dataset_portion: float = 1, genotype_to_retain: str = 'top2', bdarts: bool = False,
+         topk_on_weights: bool = False, topk_on_alphas: bool = False, topk_on_virtualstep: bool = False,
+         justtopk: bool = False, topk_k_node:int = 2, topk_temperature_node: int = 1, 
+         topk_k_edge:int = 1, topk_temperature_edge: int = 1, topk_to_remove: bool = False,
+         linear_temperature_increase: bool = False, linear_temperature_max: int = 1,
+         hd_on_weights: bool = False, hd_on_alphas: bool = False, hd_on_virtualstep: bool = False, hd_start: int = 0,
+         dal_on_alphas: bool = False, dal_on_weights: bool = False, dal_starting_epoch: int = 0, dal_factor: float = 1., dal_factor_max: int = 1, linear_dal_factor_increase: bool = False,
+         dropout_on_weights: bool = False, dropout_on_alphas: bool = False, dropout_on_virtualstep: bool = False,
+         variable_temperature: bool = False, zero_variable_temperature: bool = False, epsilon: int = 6, option: int = 1):
     """
     :param name: Experiment name
     :param dataset: CIFAR10 / CIFAR100 / ImageNet / MNIST / FashionMNIST
@@ -64,22 +73,34 @@ def main(name: str, dataset: str, data_path: str = 'datasets/', project: str = '
     Trying out Pytorch Lightning
     """)
 
-    data = DataModule(dataset=dataset, data_dir=data_path, split_train=True,
-                      cutout_length=0, batch_size=batch_size, workers=workers)
+    if debugging:
+        data = DataModule(dataset=dataset, data_dir=data_path, split_train=True,
+                      cutout_length=0, batch_size=batch_size, workers=workers, dataset_portion=0.1)
+    else:
+        data = DataModule(dataset=dataset, data_dir=data_path, split_train=True,
+                      cutout_length=0, batch_size=batch_size, workers=workers, dataset_portion=dataset_portion)
     data.setup()
 
     alpha_normal, alpha_reduce = torch.load(alphas_path) if alphas_path else (None, None)
     net = SearchCNNController(data.input_channels, init_channels, data.n_classes, n_layers, nodes, stem_multiplier,
                               search_space=search_space,
                               sparsity=sparsity, prune_strategy=prune_strategy,
-                              alpha_normal=alpha_normal, alpha_reduce=alpha_reduce, mask_alphas=mask_alphas)
+                              alpha_normal=alpha_normal, alpha_reduce=alpha_reduce, mask_alphas=mask_alphas,
+                              justtopk=justtopk, topk_k_node=topk_k_node, topk_temperature_node=topk_temperature_node, 
+                              topk_k_edge=topk_k_edge, topk_temperature_edge=topk_temperature_edge, option=option)
     model = SearchController(net, experiment.log_dir / 'cell_images',
                              bi_level_optimization=not single_level_optimization,
                              w_lr=w_lr, w_momentum=w_momentum, w_weight_decay=w_weight_decay, w_lr_min=w_lr_min,
                              w_grad_clip=w_grad_clip, nesterov=nesterov,
                              alpha_lr=alpha_lr, alpha_weight_decay=alpha_weight_decay, amended_hessian=amended_hessian,
                              normal_none_penalty=normal_none_penalty, reduce_none_penalty=reduce_none_penalty,
-                             max_epochs=epochs)
+                             max_epochs=epochs, debugging=debugging, genotype_to_retain=genotype_to_retain, bdarts=bdarts,
+                             topk_on_weights=topk_on_weights, topk_on_alphas=topk_on_alphas, topk_on_virtualstep=topk_on_virtualstep, 
+                             topk_to_remove=topk_to_remove, linear_temperature_increase=linear_temperature_increase, linear_temperature_max=linear_temperature_max,
+                             hd_on_weights=hd_on_weights, hd_on_alphas=hd_on_alphas, hd_on_virtualstep=hd_on_virtualstep, hd_start=hd_start, dal_on_alphas=dal_on_alphas, dal_on_weights=dal_on_weights,
+                             dal_starting_epoch=dal_starting_epoch, dal_factor=dal_factor, dal_factor_max=dal_factor_max, linear_dal_factor_increase=linear_dal_factor_increase,
+                             dropout_on_weights=dropout_on_weights, dropout_on_alphas=dropout_on_alphas, dropout_on_virtualstep=dropout_on_virtualstep,
+                             variable_temperature=variable_temperature, zero_variable_temperature=zero_variable_temperature, epsilon=epsilon)
 
     # callbacks = [
     #     RankingChangeEarlyStopping(monitor_param=param, patience=10)

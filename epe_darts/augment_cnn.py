@@ -149,6 +149,12 @@ class AugmentCNN(LightningModule):
         if self.auxiliary_weight:
             loss += self.auxiliary_weight * self.criterion(aux_logits, y)
 
+        #delete latter
+        '''parameters = self.named_parameters()
+        for (name, param) in parameters:
+            print(f"Parameter Name: {name}")'''
+
+
         prec1, prec5 = utils.accuracy(logits, y, topk=(1, 5))
         self.log('train_loss', loss)
         self.log('train_top1', prec1)
